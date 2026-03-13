@@ -98,7 +98,7 @@
     <Compile Include="SVP.Plugins.TrustId.CreateGuestLinkplg.cs" />
     <Compile Include="Helpers\PluginBase.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="SVP.Plugins.TrustId.ResendGuestLinkplg.cs" />
+    <Compile Include="SVP.Plugins.TrustId.AutoResendGuestLinkplg.cs" />
     <Compile Include="SVP.Plugins.TrustId.RetrieveUpdatesplg.cs" />
   </ItemGroup>
   <ItemGroup>

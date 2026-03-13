@@ -10,10 +10,10 @@ using System.Text.Json;
 
 namespace SVP.Plugins.TrustId
 {
-    public class ResendGuestLinkplg : PluginBase
+    public class AutoResendGuestLinkplg : PluginBase
     {
         //private readonly string _secureConfig;
-        public ResendGuestLinkplg(string unsecure, string secure) : base(typeof(ResendGuestLinkplg))
+        public AutoResendGuestLinkplg(string unsecure, string secure) : base(typeof(AutoResendGuestLinkplg))
         {
             //_secureConfig = secure;
         }
@@ -31,7 +31,16 @@ namespace SVP.Plugins.TrustId
             var bpssRecord = service.Retrieve(
                 "parl_bpsscheck",
                 context.PrimaryEntityId,
-                new Microsoft.Xrm.Sdk.Query.ColumnSet("parl_trustidguestlinkautoresend", "parl_trustidcontainerid", "emailaddress", "parl_firstname", "parl_lastname", "parl_trustidemailsubject", "parl_trustidemailcontent", "parl_trustidauditlog")
+                new Microsoft.Xrm.Sdk.Query.ColumnSet(
+                    "emailaddress",
+                    "parl_firstname",
+                    "parl_lastname",
+                    "parl_trustidemailsubject",
+                    "parl_trustidemailcontent",
+                    "parl_trustidauditlog",
+                    "parl_trustidguestlinkautoresend",
+                    "parl_trustidcontainerid"
+                )
             );
 
             try
@@ -55,13 +64,8 @@ namespace SVP.Plugins.TrustId
                 request["DefinitionSchemaName"] = "parl_trustidconfig";
                 var response = service.Execute(request);
                 var json = response["Value"] as string;
-
                 var config = JsonDocument.Parse(json).RootElement;
-
                 tracing.Trace("using ev config for resend");
-
-                //// Parse secure config
-                //var config = JsonDocument.Parse(_secureConfig).RootElement;
 
                 var apiKey = config.GetProperty("apikey").GetString();
                 var username = config.GetProperty("username").GetString();
@@ -116,7 +120,7 @@ namespace SVP.Plugins.TrustId
                 var sessionId = sidEl.GetString();
                 tracing.Trace($"SessionId: {sessionId}");
 
-                // --- 2) Delete existing guest link (if container ID exists) ---
+                // --- 2a) Delete existing guest link (if container ID exists) ---
                 var existingContainerId = bpssRecord.GetAttributeValue<string>("parl_trustidcontainerid");
 
                 if (!string.IsNullOrWhiteSpace(existingContainerId))
@@ -145,12 +149,10 @@ namespace SVP.Plugins.TrustId
                     tracing.Trace("No existing ContainerId found — skipping delete step.");
                 }
 
-                // --- 3) Create guest link ---
-
+                // --- 2b) Create guest link ---
 
                 var emailSubject = bpssRecord.GetAttributeValue<string>("parl_trustidemailsubject");
                 var emailContent = bpssRecord.GetAttributeValue<string>("parl_trustidemailcontent");
-
 
                 // Build markdown content dynamically
                 //var mdContent = $"**Dear {firstName},**\n\n {emailContent}\n\nIf you have any questions, please contact your HR team.";
@@ -182,7 +184,7 @@ namespace SVP.Plugins.TrustId
                 guestResp.EnsureSuccessStatusCode();
 
 
-                // --- Parse guest link response ---
+                // --- 3) Parse guest link response ---
                 string guestLinkMsg = null;
                 string containerId = null;
                 bool isSuccess = false;
@@ -204,24 +206,18 @@ namespace SVP.Plugins.TrustId
                         containerId = cidEl.GetString();
                 }
 
-                // --- 2) Update record ---
+                // --- 4) Update record ---
                 var update = new Entity("parl_bpsscheck") { Id = context.PrimaryEntityId };
 
                 //update["parl_trustidemailtype"] = false;
 
-                //update["parl_trustidresendguestlink"] = false;
-
                 update["parl_trustidguestlinkrequesteddate"] = DateTime.UtcNow;
-
-                //var expiryDays = config.GetProperty("guestLinkExpiryDays").GetInt32();
                 update["parl_trustidguestlinkexpirydate"] = DateTime.UtcNow.AddDays(expiryDays);
 
                 var user = service.Retrieve("systemuser", context.InitiatingUserId, new Microsoft.Xrm.Sdk.Query.ColumnSet("fullname"));
                 var userName = user.GetAttributeValue<string>("fullname");
                 update["parl_trustidguestlinkedrequestedby"] = userName;
                 tracing.Trace($"Requested by user: {userName}");
-
-                //update["parl_trustidguestlinkrequestsuccess"] = new OptionSetValue(isSuccess ? 802390000 : 802390001);
 
                 if (!string.IsNullOrWhiteSpace(containerId))
                     update["parl_trustidcontainerid"] = containerId;
@@ -233,17 +229,13 @@ namespace SVP.Plugins.TrustId
 
                 if (!string.IsNullOrWhiteSpace(guestLinkMsg))
                 {
-                    //update["parl_trustidguestlinkrequestmessage"] = guestLinkMsg;
                     update["parl_trustidlastmessagedescription"] = guestLinkMsg;
                     update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
                 }
 
-                //update["parl_trustidresultsjson"] = guestJson;
-
-                // --- Build audit log entry ---
+                // --- 5) Build audit log entry ---
                 var existingLog = bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
 
-                //var logAction = isSuccess ? "Guest link sent successfully." : $"Guest link failed: {guestLinkMsg}";
                 var logAction = isSuccess ? $"Guest link auto-resent successfully. Expired: {existingContainerId}" : $"Guest link resend failed: {guestLinkMsg}";
 
                 var newLogEntry = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} | {userName} | {logAction}";

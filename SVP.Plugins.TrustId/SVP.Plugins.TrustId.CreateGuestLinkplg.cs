@@ -63,13 +63,8 @@ namespace SVP.Plugins.TrustId
                 request["DefinitionSchemaName"] = "parl_trustidconfig";
                 var response = service.Execute(request);
                 var json = response["Value"] as string;
-               
                 var config = JsonDocument.Parse(json).RootElement;
-
                 tracing.Trace("using ev config");
-
-                // Parse secure config
-                //var config = JsonDocument.Parse(_secureConfig).RootElement;
 
                 var apiKey = config.GetProperty("apikey").GetString();
                 var username = config.GetProperty("username").GetString();
@@ -127,7 +122,6 @@ namespace SVP.Plugins.TrustId
 
                 var emailSubject = bpssRecord.GetAttributeValue<string>("parl_trustidemailsubject");
                 var emailContent = bpssRecord.GetAttributeValue<string>("parl_trustidemailcontent");
-
 
                 // Build markdown content dynamically
                 var mdContent = $"Dear {firstName},\n\n {emailContent}\n\nIf you have any questions, please contact UK Parliament team.";
@@ -194,8 +188,6 @@ namespace SVP.Plugins.TrustId
                 update["parl_trustidguestlinkedrequestedby"] = userName;
                 tracing.Trace($"Requested by user: {userName}");
 
-                //update["parl_trustidguestlinkrequestsuccess"] = new OptionSetValue(isSuccess ? 802390000 : 802390001);
-
                 if (!string.IsNullOrWhiteSpace(containerId))
                     update["parl_trustidcontainerid"] = containerId;
 
@@ -206,11 +198,9 @@ namespace SVP.Plugins.TrustId
 
                 if (!string.IsNullOrWhiteSpace(guestLinkMsg))
                 {
-                    //update["parl_trustidguestlinkrequestmessage"] = guestLinkMsg;
                     update["parl_trustidlastmessagedescription"] = guestLinkMsg;
                     update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
                 }
-
 
                 // --- 5) Build audit log entry ---
                 var existingLog = bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
