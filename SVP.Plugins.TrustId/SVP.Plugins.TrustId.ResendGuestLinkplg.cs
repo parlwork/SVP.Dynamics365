@@ -10,10 +10,10 @@ using System.Text.Json;
 
 namespace SVP.Plugins.TrustId
 {
-    public class CreateGuestLinkplg : PluginBase
+    public class ResendGuestLinkplg : PluginBase
     {
         //private readonly string _secureConfig;
-        public CreateGuestLinkplg(string unsecure, string secure) : base(typeof(CreateGuestLinkplg))
+        public ResendGuestLinkplg(string unsecure, string secure) : base(typeof(ResendGuestLinkplg))
         {
             //_secureConfig = secure;
         }
@@ -27,36 +27,58 @@ namespace SVP.Plugins.TrustId
             if (context.PrimaryEntityName != "parl_bpsscheck" || context.PrimaryEntityId == Guid.Empty)
                 return;
 
+            if (!context.InputParameters.Contains("Target") || !(context.InputParameters["Target"] is Entity target))
+            {
+                tracing.Trace("No Target entity found — exiting.");
+                return;
+            }
+
+            bool isManual = target.Contains("parl_trustidguestlinkresend")
+                && target.GetAttributeValue<bool>("parl_trustidguestlinkresend");
+
+            tracing.Trace($"Manual:{ isManual}");
+
+            bool isAuto = target.Contains("parl_trustidguestlinkautoresend")
+                          && target.GetAttributeValue<bool>("parl_trustidguestlinkautoresend");
+
+            tracing.Trace($"Auto:{isAuto}");
+
+            if (!isManual && !isAuto)
+            {
+                tracing.Trace("No resend requested — exiting.");
+                return;
+            }
+
+            //if (!(target.Contains("parl_trustidguestlinkresend")
+            //      && target.GetAttributeValue<bool>("parl_trustidguestlinkresend")))
+            //{
+            //    tracing.Trace("Guest link - Manual not requested — exiting.");
+            //    return;
+            //}
+
+            // Retrieve the record
+            var bpssRecord = service.Retrieve(
+                "parl_bpsscheck",
+                context.PrimaryEntityId,
+                new Microsoft.Xrm.Sdk.Query.ColumnSet(
+                    "emailaddress",
+                    "parl_firstname",
+                    "parl_lastname",
+                    "parl_trustidemailsubject",
+                    "parl_trustidemailcontent",
+                    "parl_trustidauditlog",
+                    "parl_trustidcontainerid",
+                    "parl_trustidstatus",
+                    "parl_trustiddocumentstatus"
+                )
+            );
+
             try
             {
-                if (!context.InputParameters.Contains("Target") || !(context.InputParameters["Target"] is Entity target))
-                {
-                    tracing.Trace("No Target entity found — exiting.");
+                if (!IsDeleteAllowed(bpssRecord, tracing))
                     return;
-                }
 
-                if (!(target.Contains("parl_trustidrequestguestlink")
-                      && target.GetAttributeValue<bool>("parl_trustidrequestguestlink")))
-                {
-                    tracing.Trace("Guest link not requested — exiting.");
-                    return;
-                }
-
-
-                // Retrieve the record
-                var bpssRecord = service.Retrieve(
-                    "parl_bpsscheck",
-                    context.PrimaryEntityId,
-                    new Microsoft.Xrm.Sdk.Query.ColumnSet(
-                        "emailaddress",
-                        "parl_firstname",
-                        "parl_lastname",
-                        "parl_trustidrequestguestlink",
-                        "parl_trustidemailsubject",
-                        "parl_trustidemailcontent",
-                        "parl_trustidauditlog"
-                    )
-                );
+                var existingContainerId = bpssRecord.GetAttributeValue<string>("parl_trustidcontainerid");
 
                 // Parse ev config
                 var request = new OrganizationRequest("RetrieveEnvironmentVariableValue");
@@ -64,7 +86,7 @@ namespace SVP.Plugins.TrustId
                 var response = service.Execute(request);
                 var json = response["Value"] as string;
                 var config = JsonDocument.Parse(json).RootElement;
-                tracing.Trace("using ev config");
+                tracing.Trace("using ev config for resend");
 
                 var apiKey = config.GetProperty("apikey").GetString();
                 var username = config.GetProperty("username").GetString();
@@ -78,16 +100,7 @@ namespace SVP.Plugins.TrustId
 
                 var deviceId = Guid.NewGuid().ToString();
                 tracing.Trace($"Device ID: {deviceId}");
-
-
                 var clientRef = context.PrimaryEntityId.ToString();
-
-                // Combine GUID + environment tag:
-                //var environment = config.TryGetProperty("environment", out var envEl)
-                //    ? envEl.GetString() ?? "dev"
-                //    : "dev";
-                //var clientRef = $"{context.PrimaryEntityId}|{environment}";
-
 
                 var email = bpssRecord.GetAttributeValue<string>("emailaddress");
                 tracing.Trace($"email: {email}");
@@ -127,12 +140,27 @@ namespace SVP.Plugins.TrustId
                 var sessionId = sidEl.GetString();
                 tracing.Trace($"SessionId: {sessionId}");
 
-                // --- 2) Create guest link ---
+                // --- 2) Delete existing guest link ---
+                tracing.Trace($"Deleting existing guest link with ContainerId: {existingContainerId}");
 
+                var deleteUrl = $"{baseUrl}/VPE/guestLink/deleteGuestLink";
+                var deleteBody = JsonSerializer.Serialize(new
+                {
+                    SessionId = sessionId,
+                    DeviceId = deviceId,
+                    GuestId = existingContainerId
+                });
+
+                var deleteResp = http.PostAsync(deleteUrl, new StringContent(deleteBody, Encoding.UTF8, "application/json"))
+                                     .GetAwaiter().GetResult();
+                var deleteJson = deleteResp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                tracing.Trace($"Delete response: {deleteJson}");
+                deleteResp.EnsureSuccessStatusCode();
+                tracing.Trace("Existing guest link deleted successfully.");
+
+                // --- 3) Create guest link ---
                 var emailSubject = bpssRecord.GetAttributeValue<string>("parl_trustidemailsubject");
                 var emailContent = bpssRecord.GetAttributeValue<string>("parl_trustidemailcontent");
-
-                // Build markdown content dynamically
                 var mdContent = $"Dear {firstName},\n\n {emailContent}\n\nIf you have any questions, please contact UK Parliament team.";
 
                 var guestUrl = $"{baseUrl}/VPE/guestLink/createGuestLink";
@@ -145,7 +173,6 @@ namespace SVP.Plugins.TrustId
                     BranchId = branchId,
                     EmailSubjectOverride = string.IsNullOrWhiteSpace(emailSubject) ? null : emailSubject,
                     EmailContentOverride = string.IsNullOrWhiteSpace(emailContent) ? null : mdContent,
-                    //ContainerEventCallbackUrl = callbackBaseUrl,
                     ContainerEventCallbackHeaders = new[]
                     {
                         new { Header = callbackHeaderName, Value = callbackHeaderValue }
@@ -160,8 +187,7 @@ namespace SVP.Plugins.TrustId
                 var guestJson = guestResp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 guestResp.EnsureSuccessStatusCode();
 
-
-                // --- 3) Parse guest link response ---
+                // --- 4) Parse guest link response ---
                 string guestLinkMsg = null;
                 string containerId = null;
                 bool isSuccess = false;
@@ -170,26 +196,17 @@ namespace SVP.Plugins.TrustId
                 {
                     var root = doc.RootElement;
 
-                    if (root.TryGetProperty("Message", out var msgEl))
-                        guestLinkMsg = msgEl.GetString();
-
-                    tracing.Trace($"Guest link message from TrustID: {guestLinkMsg}");
-
-
-                    if (root.TryGetProperty("Success", out var successEl))
-                        isSuccess = successEl.GetBoolean();
-
-                    if (root.TryGetProperty("ContainerId", out var cidEl))
-                        containerId = cidEl.GetString();
+                    if (root.TryGetProperty("Message", out var msgEl)) guestLinkMsg = msgEl.GetString();
+                    if (root.TryGetProperty("Success", out var successEl)) isSuccess = successEl.GetBoolean();
+                    if (root.TryGetProperty("ContainerId", out var cidEl)) containerId = cidEl.GetString();
                 }
 
-                // --- 4) Update record ---
+                tracing.Trace($"Guest link message from TrustID: {guestLinkMsg}");
+
+                // --- 5) Update record ---
                 var update = new Entity("parl_bpsscheck") { Id = context.PrimaryEntityId };
 
-                update["parl_trustidemailtype"] = false;
-
                 update["parl_trustidguestlinkrequesteddate"] = DateTime.UtcNow;
-
                 update["parl_trustidguestlinkexpirydate"] = DateTime.UtcNow.AddDays(expiryDays);
 
                 var user = service.Retrieve("systemuser", context.InitiatingUserId, new Microsoft.Xrm.Sdk.Query.ColumnSet("fullname"));
@@ -201,9 +218,7 @@ namespace SVP.Plugins.TrustId
                     update["parl_trustidcontainerid"] = containerId;
 
                 if (isSuccess)
-                {
                     update["parl_trustidstatus"] = new OptionSetValue(802390000); // Guest link sent
-                }
 
                 if (!string.IsNullOrWhiteSpace(guestLinkMsg))
                 {
@@ -211,27 +226,55 @@ namespace SVP.Plugins.TrustId
                     update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
                 }
 
-                // --- 5) Build audit log entry ---
+                // --- 6) Build audit log entry ---
                 var existingLog = bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
+                //var logAction = isSuccess
+                //    ? $"Guest link resent successfully. Expired: {existingContainerId}"
+                //    : $"Guest link resend failed: {guestLinkMsg}";
 
-                var logAction = isSuccess ? "Guest link sent successfully." : $"Guest link failed: {guestLinkMsg}";
+                var logAction = isSuccess
+                     ? $"Guest link {(isAuto ? "auto-resent" : "resent")} successfully. Expired: {existingContainerId}"
+                     : $"Guest link resend failed: {guestLinkMsg}";
+
                 var newLogEntry = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} | {userName} | {logAction}";
 
-                // Append new entry (newest at bottom)
-                var updatedLog = string.IsNullOrWhiteSpace(existingLog)
+                update["parl_trustidauditlog"] = string.IsNullOrWhiteSpace(existingLog)
                     ? newLogEntry
                     : existingLog + Environment.NewLine + newLogEntry;
 
-                update["parl_trustidauditlog"] = updatedLog;
-
                 service.Update(update);
-
             }
             catch (Exception ex)
             {
-                tracing.Trace("Error in cplgTrustIDCreateGuestLink: " + ex);
+                tracing.Trace("Error in TrustIDResendGuestLinkplg: " + ex);
                 throw;
             }
+        }
+
+        // ------------------------------------------------------------------ //
+        //  Condition guard                                                     //
+        // ------------------------------------------------------------------ //
+
+        private static bool IsDeleteAllowed(Entity bpssRecord, ITracingService tracing)
+        {
+            var currentStatus = bpssRecord.GetAttributeValue<OptionSetValue>("parl_trustidstatus")?.Value;
+            var documentStatus = bpssRecord.GetAttributeValue<OptionSetValue>("parl_trustiddocumentstatus")?.Value;
+            var existingContainerId = bpssRecord.GetAttributeValue<string>("parl_trustidcontainerid");
+
+            bool statusAllowed = currentStatus == 802390000    // Guest link sent
+                                    || currentStatus == 802390004  // Guest link auto resent
+                                    || currentStatus == 802390005; // Guest link resent
+            bool containerPresent = !string.IsNullOrWhiteSpace(existingContainerId);
+            bool documentBlocked = documentStatus == 802390000    // Documents ready to download
+                                    || documentStatus == 802390001; // Documents uploaded to PSV
+
+            tracing.Trace($"Delete conditions — Status: {currentStatus}, ContainerPresent: {containerPresent}, DocumentStatus: {documentStatus}");
+
+            if (!statusAllowed) { tracing.Trace($"Status {currentStatus} does not allow resend — exiting gracefully."); return false; }
+            if (!containerPresent) { tracing.Trace("No existing container ID — exiting gracefully."); return false; }
+            if (documentBlocked) { tracing.Trace($"Document status {documentStatus} blocks resend — exiting gracefully."); return false; }
+
+            return true;
         }
     }
 }

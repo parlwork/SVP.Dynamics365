@@ -124,7 +124,7 @@ namespace SVP.Plugins.TrustId
 
                 var http = new HttpClient();
                 http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-                http.DefaultRequestHeaders.Add("TId-Api-Key", apiKey);
+                http.DefaultRequestHeaders.Add("Tid-Api-Key", apiKey);
 
                 tracing.Trace("Calling TrustID login…");
                 var loginResp = http.PostAsync(loginUrl, new StringContent(loginBody, Encoding.UTF8, "application/json"))
