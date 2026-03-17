@@ -206,6 +206,11 @@ namespace SVP.Plugins.TrustId
                 // --- 5) Update record ---
                 var update = new Entity("parl_bpsscheck") { Id = context.PrimaryEntityId };
 
+                update["parl_trustidemailtype"] = false;
+
+                update["parl_trustidemailsubject"] = null;
+                update["parl_trustidemailcontent"] = null;
+
                 update["parl_trustidguestlinkrequesteddate"] = DateTime.UtcNow;
                 update["parl_trustidguestlinkexpirydate"] = DateTime.UtcNow.AddDays(expiryDays);
 

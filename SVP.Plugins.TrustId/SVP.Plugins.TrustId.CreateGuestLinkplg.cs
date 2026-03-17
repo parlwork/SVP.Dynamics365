@@ -188,6 +188,9 @@ namespace SVP.Plugins.TrustId
 
                 update["parl_trustidemailtype"] = false;
 
+                update["parl_trustidemailsubject"] = null;
+                update["parl_trustidemailcontent"] = null;
+
                 update["parl_trustidguestlinkrequesteddate"] = DateTime.UtcNow;
 
                 update["parl_trustidguestlinkexpirydate"] = DateTime.UtcNow.AddDays(expiryDays);
