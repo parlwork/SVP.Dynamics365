@@ -95,12 +95,12 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="SVP.Plugins.TrustId.Expiry.cs" />
-    <Compile Include="SVP.Plugins.TrustId.ResendGuestLinkplg.cs" />
-    <Compile Include="SVP.Plugins.TrustId.CreateGuestLinkplg.cs" />
+    <Compile Include="ExpireGuestLinkplg.cs" />
+    <Compile Include="ResendGuestLinkplg.cs" />
+    <Compile Include="CreateGuestLinkplg.cs" />
     <Compile Include="Helpers\PluginBase.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="SVP.Plugins.TrustId.RetrieveUpdatesplg.cs" />
+    <Compile Include="RetrieveUpdatesplg.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />
