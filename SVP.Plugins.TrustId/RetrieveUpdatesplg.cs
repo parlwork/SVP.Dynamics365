@@ -1,14 +1,13 @@
-﻿using Microsoft.Crm.Sdk.Messages;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Messages;
-using SVP.Plugins.TrustId.Helpers;
-using System;
+﻿using System;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-
+using Microsoft.Crm.Sdk.Messages;
+using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
+using SVP.Plugins.TrustId.Helpers;
 
 namespace SVP.Plugins.TrustId
 {
@@ -28,11 +27,17 @@ namespace SVP.Plugins.TrustId
             var service = localPluginContext.CurrentUserService;
             var tracing = localPluginContext.TracingService;
 
-            if (context.PrimaryEntityName != "parl_bpsscheck" || context.PrimaryEntityId == Guid.Empty)
+            if (
+                context.PrimaryEntityName != "parl_bpsscheck"
+                || context.PrimaryEntityId == Guid.Empty
+            )
                 return;
 
             // Ensure Target entity exists and contains the trigger field
-            if (!context.InputParameters.Contains("Target") || !(context.InputParameters["Target"] is Entity target))
+            if (
+                !context.InputParameters.Contains("Target")
+                || !(context.InputParameters["Target"] is Entity target)
+            )
             {
                 tracing.Trace("No Target entity found — exiting.");
                 return;
@@ -45,10 +50,14 @@ namespace SVP.Plugins.TrustId
             }
 
             // Check trigger value: Documents Ready to Download (802390000)
-            var triggerStatus = target.GetAttributeValue<OptionSetValue>("parl_trustiddocumentstatus");
+            var triggerStatus = target.GetAttributeValue<OptionSetValue>(
+                "parl_trustiddocumentstatus"
+            );
             if (triggerStatus == null || triggerStatus.Value != 802390000)
             {
-                tracing.Trace($"parl_trustiddocumentstatus is not 'Documents Ready to Download' (current value: {triggerStatus?.Value.ToString() ?? "null"}) — skipping.");
+                tracing.Trace(
+                    $"parl_trustiddocumentstatus is not 'Documents Ready to Download' (current value: {triggerStatus?.Value.ToString() ?? "null"}) — skipping."
+                );
                 return;
             }
 
@@ -62,7 +71,6 @@ namespace SVP.Plugins.TrustId
 
             tracing.Trace("using ev config");
 
-
             var apiKey = config.GetProperty("apikey").GetString();
             var username = config.GetProperty("username").GetString();
             var password = config.GetProperty("password").GetString();
@@ -72,37 +80,19 @@ namespace SVP.Plugins.TrustId
 
             tracing.Trace($"Device ID: {deviceId}");
 
-            //// Parse secure configuration
-            //if (string.IsNullOrWhiteSpace(_secureConfig))
-            //    throw new InvalidPluginExecutionException("Secure configuration is missing. Please configure the plugin step with TrustID credentials.");
-
-            //string baseUrl, apiKey, username, password, deviceId;
-            //try
-            //{
-            //    var config = JsonDocument.Parse(_secureConfig);
-            //    baseUrl = config.RootElement.GetProperty("BaseUrl").GetString();
-            //    apiKey = config.RootElement.GetProperty("ApiKey").GetString();
-            //    username = config.RootElement.GetProperty("Username").GetString();
-            //    password = config.RootElement.GetProperty("Password").GetString();
-            //    //deviceId = config.RootElement.GetProperty("DeviceId").GetString();
-
-            //    deviceId = Guid.NewGuid().ToString();
-
-            //}
-            //catch (Exception ex)
-            //{
-            //    throw new InvalidPluginExecutionException($"Failed to parse secure configuration: {ex.Message}");
-            //}
-
             // Retrieve the BPSS check record
             var bpssRecord = service.Retrieve(
                 "parl_bpsscheck",
                 context.PrimaryEntityId,
-                new Microsoft.Xrm.Sdk.Query.ColumnSet("parl_trustidcontainerid", "parl_trustiddocumentstatus", "parl_applicationresult", "parl_trustidauditlog")
+                new Microsoft.Xrm.Sdk.Query.ColumnSet(
+                    "parl_trustidcontainerid",
+                    "parl_trustiddocumentstatus",
+                    "parl_applicationresult",
+                    "parl_trustidauditlog"
+                )
             );
 
             var containerid = bpssRecord.GetAttributeValue<string>("parl_trustidcontainerid");
-            //var containerid = "86a9381d-0053-4a9b-9f38-5873f128d245";
             tracing.Trace($"Container ID: {containerid}");
 
             if (string.IsNullOrWhiteSpace(containerid))
@@ -115,45 +105,58 @@ namespace SVP.Plugins.TrustId
             {
                 // --- 1) Login to TrustID ---
                 var loginUrl = $"{baseUrl}/VPE/session/login";
-                var loginBody = JsonSerializer.Serialize(new
-                {
-                    DeviceId = deviceId,
-                    Username = username,
-                    Password = password
-                });
+                var loginBody = JsonSerializer.Serialize(
+                    new
+                    {
+                        DeviceId = deviceId,
+                        Username = username,
+                        Password = password,
+                    }
+                );
 
                 var http = new HttpClient();
-                http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                http.DefaultRequestHeaders.Accept.Add(
+                    new MediaTypeWithQualityHeaderValue("application/json")
+                );
                 http.DefaultRequestHeaders.Add("Tid-Api-Key", apiKey);
 
                 tracing.Trace("Calling TrustID login…");
-                var loginResp = http.PostAsync(loginUrl, new StringContent(loginBody, Encoding.UTF8, "application/json"))
-                                    .GetAwaiter().GetResult();
+                var loginResp = http.PostAsync(
+                        loginUrl,
+                        new StringContent(loginBody, Encoding.UTF8, "application/json")
+                    )
+                    .GetAwaiter()
+                    .GetResult();
                 var loginJson = loginResp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 loginResp.EnsureSuccessStatusCode();
 
                 var loginDoc = JsonDocument.Parse(loginJson);
                 if (!loginDoc.RootElement.TryGetProperty("SessionId", out var sidEl))
-                    throw new InvalidPluginExecutionException("TrustID login: SessionId not found.");
+                    throw new InvalidPluginExecutionException(
+                        "TrustID login: SessionId not found."
+                    );
                 var sessionId = sidEl.GetString();
 
                 // --- 2) Retrieve Document Container JSON ---
                 var retrieveDocUrl = $"{baseUrl}/VPE/dataAccess/retrieveDocumentContainer/";
-                var retrieveDocBody = JsonSerializer.Serialize(new
-                {
-                    DeviceId = deviceId,
-                    SessionId = sessionId,
-                    ContainerId = containerid
-                });
+                var retrieveDocBody = JsonSerializer.Serialize(
+                    new
+                    {
+                        DeviceId = deviceId,
+                        SessionId = sessionId,
+                        ContainerId = containerid,
+                    }
+                );
 
-                var pivotOption = bpssRecord.GetAttributeValue<OptionSetValue>("parl_applicationresult");
+                var pivotOption = bpssRecord.GetAttributeValue<OptionSetValue>(
+                    "parl_applicationresult"
+                );
                 var pivot = pivotOption?.Value ?? -1;
 
                 tracing.Trace($"Application Result pivot value: {pivot}");
 
                 string docUrl;
                 string docBody;
-
 
                 switch (pivot)
                 {
@@ -164,7 +167,8 @@ namespace SVP.Plugins.TrustId
                         break;
 
                     case 802390002: // Test Postman
-                        docUrl = "https://287112a9-60f8-4fe9-bebb-a49a5655bf72.mock.pstmn.io/VPE/dataAccess/retrieveDocumentContainer/";
+                        docUrl =
+                            "https://287112a9-60f8-4fe9-bebb-a49a5655bf72.mock.pstmn.io/VPE/dataAccess/retrieveDocumentContainer/";
                         docBody = "{}";
                         tracing.Trace("Using mock URL (Test Postman).");
                         break;
@@ -176,39 +180,46 @@ namespace SVP.Plugins.TrustId
                         break;
                 }
 
-
-                var docResp = http.PostAsync(docUrl, new StringContent(docBody, Encoding.UTF8, "application/json"))
-                  .GetAwaiter().GetResult();
-
+                var docResp = http.PostAsync(
+                        docUrl,
+                        new StringContent(docBody, Encoding.UTF8, "application/json")
+                    )
+                    .GetAwaiter()
+                    .GetResult();
 
                 docResp.EnsureSuccessStatusCode();
 
                 var jsonContent = docResp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
 
-                tracing.Trace($"Raw JSON (first 500 chars): {jsonContent.Substring(0, Math.Min(500, jsonContent.Length))}");
+                tracing.Trace(
+                    $"Raw JSON (first 500 chars): {jsonContent.Substring(0, Math.Min(500, jsonContent.Length))}"
+                );
 
-
-                // Convert Microsoft date format to readable ISO format
+                // 2a Convert Microsoft date format to readable ISO format
                 var readableJson = ConvertMicrosoftDatesToReadable(jsonContent);
 
-                // Pretty-print the JSON
+                // 2b Pretty-print the JSON
                 var jsonObject = JsonSerializer.Deserialize<JsonElement>(readableJson);
-                var prettyJson = JsonSerializer.Serialize(jsonObject, new JsonSerializerOptions { WriteIndented = true });
+                var prettyJson = JsonSerializer.Serialize(
+                    jsonObject,
+                    new JsonSerializerOptions { WriteIndented = true }
+                );
                 var jsonBytes = Encoding.UTF8.GetBytes(prettyJson);
 
                 tracing.Trace($"Document container JSON retrieved, size: {jsonBytes.Length} bytes");
 
-                // Upload JSON to parl_trustidcontainerinfo
+                // 2c Upload JSON to parl_trustidcontainerinfo
                 var jsonFileName = $"Report_{containerid}_{DateTime.UtcNow:yyyyMMddHHmmss}.json";
 
                 var initJsonRequest = new InitializeFileBlocksUploadRequest
                 {
                     Target = new EntityReference("parl_bpsscheck", context.PrimaryEntityId),
                     FileAttributeName = "parl_trustidresultsinfo",
-                    FileName = jsonFileName
+                    FileName = jsonFileName,
                 };
 
-                var initJsonResponse = (InitializeFileBlocksUploadResponse)service.Execute(initJsonRequest);
+                var initJsonResponse = (InitializeFileBlocksUploadResponse)
+                    service.Execute(initJsonRequest);
                 var jsonContinuationToken = initJsonResponse.FileContinuationToken;
 
                 tracing.Trace("JSON file upload initialized");
@@ -219,7 +230,7 @@ namespace SVP.Plugins.TrustId
                 {
                     BlockData = jsonBytes,
                     BlockId = jsonBlockId,
-                    FileContinuationToken = jsonContinuationToken
+                    FileContinuationToken = jsonContinuationToken,
                 };
 
                 service.Execute(uploadJsonRequest);
@@ -230,29 +241,35 @@ namespace SVP.Plugins.TrustId
                     BlockList = new[] { jsonBlockId },
                     FileContinuationToken = jsonContinuationToken,
                     FileName = jsonFileName,
-                    MimeType = "application/json"
+                    MimeType = "application/json",
                 };
 
                 service.Execute(commitJsonRequest);
-                tracing.Trace($"Document container JSON uploaded to parl_trustidresultsinfo: {jsonFileName}");
+                tracing.Trace(
+                    $"Document container JSON uploaded to parl_trustidresultsinfo: {jsonFileName}"
+                );
 
                 // --- 3) Export PDF Report and attach as Note ---
                 var exportPdfUrl = $"{baseUrl}/VPE/dataAccess/exportPDF/";
-                var exportPdfBody = JsonSerializer.Serialize(new
-                {
-                    DeviceId = deviceId,
-                    SessionId = sessionId,
-                    ContainerId = containerid
-                });
+                var exportPdfBody = JsonSerializer.Serialize(
+                    new
+                    {
+                        DeviceId = deviceId,
+                        SessionId = sessionId,
+                        ContainerId = containerid,
+                    }
+                );
 
                 tracing.Trace("Calling TrustID exportPDF…");
 
                 var pdfRequest = new HttpRequestMessage(HttpMethod.Post, exportPdfUrl)
                 {
-                    Content = new StringContent(exportPdfBody, Encoding.UTF8, "application/json")
+                    Content = new StringContent(exportPdfBody, Encoding.UTF8, "application/json"),
                 };
                 pdfRequest.Headers.Accept.Clear();
-                pdfRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/pdf"));
+                pdfRequest.Headers.Accept.Add(
+                    new MediaTypeWithQualityHeaderValue("application/pdf")
+                );
 
                 var pdfResp = http.SendAsync(pdfRequest).GetAwaiter().GetResult();
                 pdfResp.EnsureSuccessStatusCode();
@@ -266,7 +283,8 @@ namespace SVP.Plugins.TrustId
                 note["objectid"] = new EntityReference("parl_bpsscheck", context.PrimaryEntityId);
                 note["objecttypecode"] = "parl_bpsscheck";
                 note["subject"] = $"TrustID Report - {containerid}";
-                note["notetext"] = $"#report downloaded on {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC";
+                note["notetext"] =
+                    $"#report downloaded on {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC";
                 note["filename"] = pdfFileName;
                 note["mimetype"] = "application/pdf";
                 note["documentbody"] = Convert.ToBase64String(pdfBytes);
@@ -280,21 +298,31 @@ namespace SVP.Plugins.TrustId
                 {
                     var containerData = JsonSerializer.Deserialize<JsonElement>(jsonContent);
 
-                    if (containerData.TryGetProperty("Container", out var containerElement) &&
-                        containerElement.TryGetProperty("ApplicantPhotoImage", out var applicantPhoto) &&
-                        applicantPhoto.TryGetProperty("Id", out var photoIdElement))
+                    if (
+                        containerData.TryGetProperty("Container", out var containerElement)
+                        && containerElement.TryGetProperty(
+                            "ApplicantPhotoImage",
+                            out var applicantPhoto
+                        )
+                        && applicantPhoto.TryGetProperty("Id", out var photoIdElement)
+                    )
                     {
                         var photoId = photoIdElement.GetString();
                         tracing.Trace($"Found ApplicantPhotoImage ID: {photoId}");
 
-                        var imageUrl = $"{baseUrl}/VPE/dataAccess/image/?id={photoId}&DeviceId={deviceId}&SessionId={sessionId}";
+                        var imageUrl =
+                            $"{baseUrl}/VPE/dataAccess/image/?id={photoId}&DeviceId={deviceId}&SessionId={sessionId}";
 
                         tracing.Trace("Calling TrustID getImage for applicant photo…");
                         var imageResp = http.GetAsync(imageUrl).GetAwaiter().GetResult();
                         imageResp.EnsureSuccessStatusCode();
 
-                        var imageBytes = imageResp.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-                        var contentType = imageResp.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+                        var imageBytes = imageResp
+                            .Content.ReadAsByteArrayAsync()
+                            .GetAwaiter()
+                            .GetResult();
+                        var contentType =
+                            imageResp.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
 
                         string fileExtension;
                         if (contentType == "image/png")
@@ -306,14 +334,21 @@ namespace SVP.Plugins.TrustId
                         else
                             fileExtension = "jpg";
 
-                        var selfieFileName = $"Selfie_{containerid}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{fileExtension}";
-                        tracing.Trace($"Selfie downloaded successfully, size: {imageBytes.Length} bytes");
+                        var selfieFileName =
+                            $"Selfie_{containerid}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{fileExtension}";
+                        tracing.Trace(
+                            $"Selfie downloaded successfully, size: {imageBytes.Length} bytes"
+                        );
 
                         var selfieNote = new Entity("annotation");
-                        selfieNote["objectid"] = new EntityReference("parl_bpsscheck", context.PrimaryEntityId);
+                        selfieNote["objectid"] = new EntityReference(
+                            "parl_bpsscheck",
+                            context.PrimaryEntityId
+                        );
                         selfieNote["objecttypecode"] = "parl_bpsscheck";
                         selfieNote["subject"] = $"TrustID Applicant Selfie - {containerid}";
-                        selfieNote["notetext"] = $"#selfie downloaded on {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC";
+                        selfieNote["notetext"] =
+                            $"#selfie downloaded on {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC";
                         selfieNote["filename"] = selfieFileName;
                         selfieNote["mimetype"] = contentType;
                         selfieNote["documentbody"] = Convert.ToBase64String(imageBytes);
@@ -324,7 +359,9 @@ namespace SVP.Plugins.TrustId
                     }
                     else
                     {
-                        tracing.Trace("ApplicantPhotoImage.Id not found in container data - skipping selfie upload");
+                        tracing.Trace(
+                            "ApplicantPhotoImage.Id not found in container data - skipping selfie upload"
+                        );
                     }
                 }
                 catch (Exception ex)
@@ -335,10 +372,10 @@ namespace SVP.Plugins.TrustId
 
                 // --- 5) Update status and timestamp ---
                 var update = new Entity("parl_bpsscheck") { Id = context.PrimaryEntityId };
+
+                //Status and Document Status
                 update["parl_trustiddocumentstatus"] = new OptionSetValue(802390001); // Documents Uploaded to PSV
-                update["parl_trustidresultsupdatedon"] = DateTime.UtcNow;
                 update["parl_trustidstatus"] = new OptionSetValue(802390002);
-                update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
 
                 // Extract summary fields from container JSON
                 try
@@ -348,10 +385,18 @@ namespace SVP.Plugins.TrustId
                     var containerEl = root.GetProperty("Container");
 
                     // Document field variables
-                    string firstName = null, middleName = null, surname = null;
-                    string dob = null, expiryDate = null, nationality = null, docType = null;
+                    string firstName = null,
+                        middleName = null,
+                        surname = null;
+                    string dob = null,
+                        expiryDate = null,
+                        nationality = null,
+                        docType = null;
 
-                    if (containerEl.TryGetProperty("Documents", out var documents) && documents.GetArrayLength() > 0)
+                    if (
+                        containerEl.TryGetProperty("Documents", out var documents)
+                        && documents.GetArrayLength() > 0
+                    )
                     {
                         var firstDoc = documents[0];
 
@@ -369,21 +414,29 @@ namespace SVP.Plugins.TrustId
                                 switch (fieldName)
                                 {
                                     case "VI Firstname":
-                                        firstName = field.GetProperty("FieldValueString").GetString();
+                                        firstName = field
+                                            .GetProperty("FieldValueString")
+                                            .GetString();
                                         break;
                                     case "VI Middlename":
-                                        middleName = field.GetProperty("FieldValueString").GetString();
+                                        middleName = field
+                                            .GetProperty("FieldValueString")
+                                            .GetString();
                                         break;
                                     case "VI Surname":
                                         surname = field.GetProperty("FieldValueString").GetString();
                                         break;
                                     case "VI Birth Date":
-                                        var dobRaw = field.GetProperty("FieldValueDate").GetString();
+                                        var dobRaw = field
+                                            .GetProperty("FieldValueDate")
+                                            .GetString();
                                         if (DateTime.TryParse(dobRaw, out var dobParsed))
                                             dob = dobParsed.ToString("dd/MM/yyyy");
                                         break;
                                     case "VI Expiration Date":
-                                        var expRaw = field.GetProperty("FieldValueDate").GetString();
+                                        var expRaw = field
+                                            .GetProperty("FieldValueDate")
+                                            .GetString();
                                         if (DateTime.TryParse(expRaw, out var expParsed))
                                             expiryDate = expParsed.ToString("dd/MM/yyyy");
                                         break;
@@ -393,70 +446,218 @@ namespace SVP.Plugins.TrustId
                     }
 
                     // Address variables
-                    string address1 = null, address2 = null, address3 = null;
-                    string address4 = null, address5 = null, address6 = null;
-                    string postcode = null, countryCode = null;
+                    string address1 = null,
+                        address2 = null,
+                        address3 = null;
+                    string address4 = null,
+                        address5 = null,
+                        address6 = null;
+                    string postcode = null,
+                        countryCode = null;
 
-                    if (containerEl.TryGetProperty("DocumentContainerFieldList", out var containerFields))
+                    if (
+                        containerEl.TryGetProperty(
+                            "DocumentContainerFieldList",
+                            out var containerFields
+                        )
+                    )
                     {
                         foreach (var field in containerFields.EnumerateArray())
                         {
                             var fieldName = field.GetProperty("Name").GetString();
                             var fieldValue = field.TryGetProperty("FieldValueString", out var fv)
-                                             ? fv.GetString() : null;
+                                ? fv.GetString()
+                                : null;
 
                             switch (fieldName)
                             {
-                                case "Address1": address1 = fieldValue; break;
-                                case "Address2": address2 = fieldValue; break;
-                                case "Address3": address3 = fieldValue; break;
-                                case "Address4": address4 = fieldValue; break;
-                                case "Address5": address5 = fieldValue; break;
-                                case "Address6": address6 = fieldValue; break;
-                                case "Address_Postcode": postcode = fieldValue; break;
-                                case "Address_CountryCode": countryCode = fieldValue; break;
+                                case "Address1":
+                                    address1 = fieldValue;
+                                    break;
+                                case "Address2":
+                                    address2 = fieldValue;
+                                    break;
+                                case "Address3":
+                                    address3 = fieldValue;
+                                    break;
+                                case "Address4":
+                                    address4 = fieldValue;
+                                    break;
+                                case "Address5":
+                                    address5 = fieldValue;
+                                    break;
+                                case "Address6":
+                                    address6 = fieldValue;
+                                    break;
+                                case "Address_Postcode":
+                                    postcode = fieldValue;
+                                    break;
+                                case "Address_CountryCode":
+                                    countryCode = fieldValue;
+                                    break;
                             }
                         }
                     }
 
-                    var addressParts = new[] { address1, address2, address3, address4, address5, address6, postcode, countryCode }
-                        .Where(p => !string.IsNullOrWhiteSpace(p));
+                    var addressParts = new[]
+                    {
+                        address1,
+                        address2,
+                        address3,
+                        address4,
+                        address5,
+                        address6,
+                        postcode,
+                        countryCode,
+                    }.Where(p => !string.IsNullOrWhiteSpace(p));
                     var fullAddress = string.Join(", ", addressParts);
 
                     // Get validation list once for all checks
                     JsonElement validationList = default;
-                    var hasValidationList = containerEl.TryGetProperty("DocumentContainerValidationList", out validationList);
+                    var hasValidationList = containerEl.TryGetProperty(
+                        "DocumentContainerValidationList",
+                        out validationList
+                    );
 
-                    // --- RTW Digital Identity Check ---
-                    string rtwStatus = "N/A";
-                    var rtwFailureReasons = new System.Collections.Generic.List<string>();
-
-                    foreach (var v in validationList.EnumerateArray())
+                    // --- Step 1: Detect RTW method --- Share code update
+                    bool isShareCode = false;
+                    if (containerEl.TryGetProperty("Documents", out var docsForRtwCheck))
                     {
-                        var vName = v.GetProperty("Name").GetString();
-                        if (vName == "RightToWorkDigitalIdentityVerificationCheck")
+                        foreach (var d in docsForRtwCheck.EnumerateArray())
                         {
-                            var outcome = v.GetProperty("ValidationOutcome").GetInt32();
-                            rtwStatus = outcome == 4 ? "Pass" : "Fail";
-                            break;
+                            if (d.TryGetProperty("DocumentType", out var dtEl)
+                                && dtEl.TryGetInt32(out var type)
+                                && type == 6)
+                            {
+                                isShareCode = true;
+                                break;
+                            }
                         }
                     }
+                    var rtwMethod = isShareCode ? "Share Code" : "Digital Identity";
+                    tracing.Trace($"RTW Method: {rtwMethod}");
 
-                    if (rtwStatus == "Fail")
+                    // --- Step 2: Extract RTW flexible fields (both paths) ---
+                    string rtwFlexStatus = null, rtwWorkRestrictions = null;
+                    string rtwFollowUpDate = null, rtwNotes = null;
+
+                    if (containerEl.TryGetProperty("ApplicationFlexibleFieldList", out var flexFields))
                     {
-                        foreach (var v in validationList.EnumerateArray())
+                        foreach (var item in flexFields.EnumerateArray())
                         {
-                            var vName = v.GetProperty("Name").GetString();
-                            if (vName.StartsWith("RightToWorkDigitalIdentity") && vName != "RightToWorkDigitalIdentityVerificationCheck" && v.GetProperty("ValidationOutcome").GetInt32() != 4)
+                            if (!item.TryGetProperty("m_Item2", out var m2))
+                                continue;
+
+                            var flexName = m2.TryGetProperty("FlexibleFieldNameDup", out var fnEl)
+                                ? fnEl.GetString() : null;
+
+                            if (flexName == null) continue;
+
+                            switch (flexName)
                             {
-                                rtwFailureReasons.Add(vName.Replace("RightToWorkDigitalIdentity", "").Replace("Verification", ""));
+                                case "__RTW_RightToWorkStatus":
+                                    rtwFlexStatus = m2.TryGetProperty("FieldValueString", out var vs)
+                                        ? vs.GetString() : null;
+                                    break;
+                                case "__RTW_WorkRestrictions":
+                                    rtwWorkRestrictions = m2.TryGetProperty("FieldValueString", out var wr)
+                                        ? wr.GetString() : null;
+                                    break;
+                                case "__RTW_FollowUpDate":
+                                    var rawDate = m2.TryGetProperty("FieldValueDate", out var fd)
+                                        ? fd.GetString() : null;
+                                    if (!string.IsNullOrWhiteSpace(rawDate) && DateTime.TryParse(rawDate, out var fuParsed))
+                                        rtwFollowUpDate = fuParsed.ToString("dd/MM/yyyy");
+                                    break;
+                                case "__RTW_Notes":
+                                    rtwNotes = m2.TryGetProperty("FieldValueString", out var nt)
+                                        ? nt.GetString() : null;
+                                    break;
                             }
                         }
                     }
 
-                    var rtwSummary = rtwStatus == "Fail" && rtwFailureReasons.Count > 0
-                        ? $"{rtwStatus} ({string.Join(", ", rtwFailureReasons)})"
-                        : rtwStatus;
+                    tracing.Trace($"RTW Flex — Status: {rtwFlexStatus ?? "N/A"}, Restrictions: {rtwWorkRestrictions ?? "none"}, FollowUp: {rtwFollowUpDate ?? "none"}, Notes: {rtwNotes ?? "none"}");
+
+
+
+                    // --- Step 3: Digital Identity verification check (only when not Share Code) ---
+                    string rtwDigitalIdResult = null;
+                    var rtwDigitalIdFailureReasons = new System.Collections.Generic.List<string>();
+
+                    if (!isShareCode && hasValidationList)
+                    {
+                        foreach (var v in validationList.EnumerateArray())
+                        {
+                            var vName = v.GetProperty("Name").GetString();
+                            if (vName == "RightToWorkDigitalIdentityVerificationCheck")
+                            {
+                                var outcome = v.GetProperty("ValidationOutcome").GetInt32();
+                                rtwDigitalIdResult = outcome == 4 ? "Pass" : "Fail";
+                                break;
+                            }
+                        }
+
+                        if (rtwDigitalIdResult == "Fail")
+                        {
+                            foreach (var v in validationList.EnumerateArray())
+                            {
+                                var vName = v.GetProperty("Name").GetString();
+                                if (vName.StartsWith("RightToWorkDigitalIdentity")
+                                    && vName != "RightToWorkDigitalIdentityVerificationCheck"
+                                    && v.GetProperty("ValidationOutcome").GetInt32() != 4)
+                                {
+                                    rtwDigitalIdFailureReasons.Add(
+                                        vName.Replace("RightToWorkDigitalIdentity", "")
+                                             .Replace("Verification", ""));
+                                }
+                            }
+                        }
+                    }
+
+                    // --- Step 4: Build compact RTW line for results section ---
+                    string rtwCompactLine;
+
+                    if (isShareCode)
+                    {
+                        // Share Code: RTW: Share Code - Continuous
+                        rtwCompactLine = $"RTW: Share Code - {rtwFlexStatus ?? "N/A"}";
+                    }
+                    else
+                    {
+                        // Digital Identity: RTW: Digital Identity - Pass - Continuous
+                        var checkPart = rtwDigitalIdResult ?? "N/A";
+                        if (rtwDigitalIdResult == "Fail" && rtwDigitalIdFailureReasons.Count > 0)
+                            checkPart += $" ({string.Join(", ", rtwDigitalIdFailureReasons)})";
+
+                        rtwCompactLine = $"RTW: Digital Identity - {checkPart} - {rtwFlexStatus ?? "N/A"}";
+                    }
+
+                    // --- Step 5: Build RTW Details section (only populated lines) ---
+                    var rtwDetailLines = new System.Collections.Generic.List<string>();
+                    rtwDetailLines.Add("RTW Details");
+                    rtwDetailLines.Add($"Method: {rtwMethod}");
+
+                    if (!isShareCode && rtwDigitalIdResult != null)
+                    {
+                        var checkDetail = rtwDigitalIdResult;
+                        if (rtwDigitalIdResult == "Fail" && rtwDigitalIdFailureReasons.Count > 0)
+                            checkDetail += $" ({string.Join(", ", rtwDigitalIdFailureReasons)})";
+                        rtwDetailLines.Add($"Check: {checkDetail}");
+                    }
+
+                    rtwDetailLines.Add($"Status: {rtwFlexStatus ?? "N/A"}");
+
+                    if (!string.IsNullOrWhiteSpace(rtwWorkRestrictions))
+                        rtwDetailLines.Add($"Work Restrictions: {rtwWorkRestrictions}");
+
+                    if (!string.IsNullOrWhiteSpace(rtwFollowUpDate))
+                        rtwDetailLines.Add($"Follow-Up Date: {rtwFollowUpDate}");
+
+                    if (!string.IsNullOrWhiteSpace(rtwNotes))
+                        rtwDetailLines.Add($"Notes: {rtwNotes}");
+
+                    var rtwDetails = string.Join("\n", rtwDetailLines);
 
                     // Extract DBS Basic check results
                     string dbsStatus = "N/A";
@@ -480,17 +681,25 @@ namespace SVP.Plugins.TrustId
                             foreach (var v in validationList.EnumerateArray())
                             {
                                 var vName = v.GetProperty("Name").GetString();
-                                if (vName.StartsWith("DBSBasicDigitalIdentity") && v.GetProperty("ValidationOutcome").GetInt32() != 4)
+                                if (
+                                    vName.StartsWith("DBSBasicDigitalIdentity")
+                                    && v.GetProperty("ValidationOutcome").GetInt32() != 4
+                                )
                                 {
-                                    dbsFailureReasons.Add(vName.Replace("DBSBasicDigitalIdentity", "").Replace("Verification", ""));
+                                    dbsFailureReasons.Add(
+                                        vName
+                                            .Replace("DBSBasicDigitalIdentity", "")
+                                            .Replace("Verification", "")
+                                    );
                                 }
                             }
                         }
                     }
 
-                    var dbsSummary = dbsStatus == "Fail" && dbsFailureReasons.Count > 0
-                        ? $"{dbsStatus} ({string.Join(", ", dbsFailureReasons)})"
-                        : dbsStatus;
+                    var dbsSummary =
+                        dbsStatus == "Fail" && dbsFailureReasons.Count > 0
+                            ? $"{dbsStatus} ({string.Join(", ", dbsFailureReasons)})"
+                            : dbsStatus;
 
                     // --- Address Verification ---
                     string addressVerificationResult = "N/A";
@@ -500,8 +709,12 @@ namespace SVP.Plugins.TrustId
                         var vName = v.GetProperty("Name").GetString();
                         if (vName == "AddressVerification")
                         {
-                            addressVerificationResult = v.TryGetProperty("DetailedResult", out var ar)
-                                ? ar.GetString() : "N/A";
+                            addressVerificationResult = v.TryGetProperty(
+                                "DetailedResult",
+                                out var ar
+                            )
+                                ? ar.GetString()
+                                : "N/A";
                             break;
                         }
                     }
@@ -515,11 +728,11 @@ namespace SVP.Plugins.TrustId
                         if (vName == "KycAmlCheck")
                         {
                             kycAmlResult = v.TryGetProperty("DetailedResult", out var kr)
-                                ? kr.GetString() : "N/A";
+                                ? kr.GetString()
+                                : "N/A";
                             break;
                         }
                     }
-
 
                     // --- Overall Status: 0=NO_ALERT, 1=ALERT, 2=RESOLVED ---
                     string overallStatus = "N/A";
@@ -528,41 +741,59 @@ namespace SVP.Plugins.TrustId
                         var overallValue = overallEl.GetInt32();
                         switch (overallValue)
                         {
-                            case 0: overallStatus = "No Alert"; break;
-                            case 1: overallStatus = "Alert - Needs Investigation"; break;
-                            case 2: overallStatus = "Resolved"; break;
-                            default: overallStatus = $"Unknown ({overallValue})"; break;
+                            case 0:
+                                overallStatus = "No Alert";
+                                break;
+                            case 1:
+                                overallStatus = "Alert - Needs Investigation";
+                                break;
+                            case 2:
+                                overallStatus = "Resolved";
+                                break;
+                            default:
+                                overallStatus = $"Unknown ({overallValue})";
+                                break;
                         }
                     }
 
+                    // Report Details 
 
-                    var resultsdescription =
-                        "Reports Status.\n" +
-                        $"Fullname: {containerEl.GetProperty("Fullname").GetString()}\n" +
-                        $"Message: {root.GetProperty("Message").GetString()}\n" +
-                        $"ContainerId: {containerEl.GetProperty("Id").GetString()}";
-
+                    // --- Step 6: Build results status with new compact RTW line ---
                     var resultsstatus =
-                        $"RTW Check: {rtwSummary}\n" +
+                        rtwCompactLine + "\n" +
                         $"DBS Basic Check: {dbsSummary}\n" +
-                        $"Address Verification: {addressVerificationResult}\n" +
-                        $"KYC/AML Check: {kycAmlResult}\n" +
-                        $"Overall Status: {overallStatus}";
+                        $"Address Verification: {addressVerificationResult}";
 
                     var documentSummary =
-                        $"Document: {docType ?? "Unknown"}\n" +
-                        $"First Name: {firstName ?? "N/A"}\n" +
-                        $"Middle Name: {middleName ?? "N/A"}\n" +
-                        $"Surname: {surname ?? "N/A"}\n" +
-                        $"Date of Birth: {dob ?? "N/A"}\n" +
-                        $"Expiry Date: {expiryDate ?? "N/A"}\n" +
-                        $"Nationality: {nationality ?? "N/A"}\n" +
-                        $"Address: {(string.IsNullOrWhiteSpace(fullAddress) ? "N/A" : fullAddress)}";
+                        $"Document: {docType ?? "Unknown"}\n"
+                        + $"First Name: {firstName ?? "N/A"}\n"
+                        + $"Middle Name: {middleName ?? "N/A"}\n"
+                        + $"Surname: {surname ?? "N/A"}\n"
+                        + $"Date of Birth: {dob ?? "N/A"}\n"
+                        + $"Expiry Date: {expiryDate ?? "N/A"}\n"
+                        + $"Nationality: {nationality ?? "N/A"}\n"
+                        + $"Address: {(string.IsNullOrWhiteSpace(fullAddress) ? "N/A" : fullAddress)}";
 
-                    update["parl_trustidresultsdescription"] = resultsdescription;
-                    update["parl_trustidlastmessagedescription"] = resultsdescription;
+                    var otherNotes =
+                        $"KYC/AML Check: {kycAmlResult}\n" + $"Overall Status: {overallStatus}";
 
-                    update["parl_trustidreportdetails"] = resultsstatus + "\n\n" + documentSummary;
+                    // --- Step 7: Assemble report with RTW Details section ---
+                    update["parl_trustidreportdetails"] = resultsstatus + "\n\n" + documentSummary + "\n\n" + rtwDetails + "\n\n" + otherNotes;
+
+                    // Summary Description
+                    var summarydescription =
+                        "Reports Status.\n"
+                        + $"Fullname: {containerEl.GetProperty("Fullname").GetString()}\n"
+                        + $"Message: {root.GetProperty("Message").GetString()}\n"
+                        + $"ContainerId: {containerEl.GetProperty("Id").GetString()}";
+
+                    // Last Message 
+                    update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
+                    update["parl_trustidlastmessagedescription"] = summarydescription;
+
+                    // Results Description
+                    update["parl_trustidresultsupdatedon"] = DateTime.UtcNow;
+                    update["parl_trustidresultsdescription"] = summarydescription;
 
 
                 }
@@ -571,25 +802,29 @@ namespace SVP.Plugins.TrustId
                     tracing.Trace($"Could not extract progress description: {ex.Message}");
                 }
 
-
                 // --- Audit log entry ---
-                var existingLog = bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
-                var logEntry = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} | SYSTEM | Documents retrieved and uploaded (Container: {containerid})";
+                var existingLog =
+                    bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
+                var logEntry =
+                    $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} | SYSTEM | Documents retrieved and uploaded (Container: {containerid})";
 
                 update["parl_trustidauditlog"] = string.IsNullOrWhiteSpace(existingLog)
                     ? logEntry
                     : existingLog + Environment.NewLine + logEntry;
 
-
                 service.Update(update);
-                tracing.Trace("Record updated: parl_trustiddocumentstatus set to 'Documents Uploaded to PSV', parl_trustidlastmessagedate stamped.");
+                tracing.Trace(
+                    "Record updated: parl_trustiddocumentstatus set to 'Documents Uploaded to PSV', parl_trustidlastmessagedate stamped."
+                );
             }
             catch (Exception ex)
             {
                 tracing.Trace("Error in TrustIDRetrieveUpdatesplg: " + ex);
 
-                var existingLog = bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
-                var logEntry = $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} | SYSTEM | Document retrieval failed: {ex.Message}";
+                var existingLog =
+                    bpssRecord.GetAttributeValue<string>("parl_trustidauditlog") ?? string.Empty;
+                var logEntry =
+                    $"{DateTime.UtcNow:yyyy-MM-dd HH:mm} | SYSTEM | Document retrieval failed: {ex.Message}";
 
                 var failUpdate = new Entity("parl_bpsscheck") { Id = context.PrimaryEntityId };
                 failUpdate["parl_trustidauditlog"] = string.IsNullOrWhiteSpace(existingLog)
@@ -604,15 +839,20 @@ namespace SVP.Plugins.TrustId
 
         private static string ConvertMicrosoftDatesToReadable(string json)
         {
-            var regex = new System.Text.RegularExpressions.Regex(@"\\?/Date\((-?\d+)([+-]\d{4})?\)\\?/");
+            var regex = new System.Text.RegularExpressions.Regex(
+                @"\\?/Date\((-?\d+)([+-]\d{4})?\)\\?/"
+            );
 
-            return regex.Replace(json, match =>
-            {
-                var milliseconds = long.Parse(match.Groups[1].Value);
-                var dateTime = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
-                //return $"\"{dateTime:yyyy-MM-ddTHH:mm:ss.fffZ}\"";
-                return dateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
-            });
+            return regex.Replace(
+                json,
+                match =>
+                {
+                    var milliseconds = long.Parse(match.Groups[1].Value);
+                    var dateTime = DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
+                    //return $"\"{dateTime:yyyy-MM-ddTHH:mm:ss.fffZ}\"";
+                    return dateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+                }
+            );
         }
     }
 }
