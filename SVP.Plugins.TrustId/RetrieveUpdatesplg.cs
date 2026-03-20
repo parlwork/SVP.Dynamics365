@@ -525,9 +525,11 @@ namespace SVP.Plugins.TrustId
                     {
                         foreach (var d in docsForRtwCheck.EnumerateArray())
                         {
-                            if (d.TryGetProperty("DocumentType", out var dtEl)
+                            if (
+                                d.TryGetProperty("DocumentType", out var dtEl)
                                 && dtEl.TryGetInt32(out var type)
-                                && type == 6)
+                                && type == 6
+                            )
                             {
                                 isShareCode = true;
                                 break;
@@ -538,10 +540,17 @@ namespace SVP.Plugins.TrustId
                     tracing.Trace($"RTW Method: {rtwMethod}");
 
                     // --- Step 2: Extract RTW flexible fields (both paths) ---
-                    string rtwFlexStatus = null, rtwWorkRestrictions = null;
-                    string rtwFollowUpDate = null, rtwNotes = null;
+                    string rtwFlexStatus = null,
+                        rtwWorkRestrictions = null;
+                    string rtwFollowUpDate = null,
+                        rtwNotes = null;
 
-                    if (containerEl.TryGetProperty("ApplicationFlexibleFieldList", out var flexFields))
+                    if (
+                        containerEl.TryGetProperty(
+                            "ApplicationFlexibleFieldList",
+                            out var flexFields
+                        )
+                    )
                     {
                         foreach (var item in flexFields.EnumerateArray())
                         {
@@ -549,37 +558,52 @@ namespace SVP.Plugins.TrustId
                                 continue;
 
                             var flexName = m2.TryGetProperty("FlexibleFieldNameDup", out var fnEl)
-                                ? fnEl.GetString() : null;
+                                ? fnEl.GetString()
+                                : null;
 
-                            if (flexName == null) continue;
+                            if (flexName == null)
+                                continue;
 
                             switch (flexName)
                             {
                                 case "__RTW_RightToWorkStatus":
-                                    rtwFlexStatus = m2.TryGetProperty("FieldValueString", out var vs)
-                                        ? vs.GetString() : null;
+                                    rtwFlexStatus = m2.TryGetProperty(
+                                        "FieldValueString",
+                                        out var vs
+                                    )
+                                        ? vs.GetString()
+                                        : null;
                                     break;
                                 case "__RTW_WorkRestrictions":
-                                    rtwWorkRestrictions = m2.TryGetProperty("FieldValueString", out var wr)
-                                        ? wr.GetString() : null;
+                                    rtwWorkRestrictions = m2.TryGetProperty(
+                                        "FieldValueString",
+                                        out var wr
+                                    )
+                                        ? wr.GetString()
+                                        : null;
                                     break;
                                 case "__RTW_FollowUpDate":
                                     var rawDate = m2.TryGetProperty("FieldValueDate", out var fd)
-                                        ? fd.GetString() : null;
-                                    if (!string.IsNullOrWhiteSpace(rawDate) && DateTime.TryParse(rawDate, out var fuParsed))
+                                        ? fd.GetString()
+                                        : null;
+                                    if (
+                                        !string.IsNullOrWhiteSpace(rawDate)
+                                        && DateTime.TryParse(rawDate, out var fuParsed)
+                                    )
                                         rtwFollowUpDate = fuParsed.ToString("dd/MM/yyyy");
                                     break;
                                 case "__RTW_Notes":
                                     rtwNotes = m2.TryGetProperty("FieldValueString", out var nt)
-                                        ? nt.GetString() : null;
+                                        ? nt.GetString()
+                                        : null;
                                     break;
                             }
                         }
                     }
 
-                    tracing.Trace($"RTW Flex — Status: {rtwFlexStatus ?? "N/A"}, Restrictions: {rtwWorkRestrictions ?? "none"}, FollowUp: {rtwFollowUpDate ?? "none"}, Notes: {rtwNotes ?? "none"}");
-
-
+                    tracing.Trace(
+                        $"RTW Flex — Status: {rtwFlexStatus ?? "N/A"}, Restrictions: {rtwWorkRestrictions ?? "none"}, FollowUp: {rtwFollowUpDate ?? "none"}, Notes: {rtwNotes ?? "none"}"
+                    );
 
                     // --- Step 3: Digital Identity verification check (only when not Share Code) ---
                     string rtwDigitalIdResult = null;
@@ -603,13 +627,17 @@ namespace SVP.Plugins.TrustId
                             foreach (var v in validationList.EnumerateArray())
                             {
                                 var vName = v.GetProperty("Name").GetString();
-                                if (vName.StartsWith("RightToWorkDigitalIdentity")
+                                if (
+                                    vName.StartsWith("RightToWorkDigitalIdentity")
                                     && vName != "RightToWorkDigitalIdentityVerificationCheck"
-                                    && v.GetProperty("ValidationOutcome").GetInt32() != 4)
+                                    && v.GetProperty("ValidationOutcome").GetInt32() != 4
+                                )
                                 {
                                     rtwDigitalIdFailureReasons.Add(
-                                        vName.Replace("RightToWorkDigitalIdentity", "")
-                                             .Replace("Verification", ""));
+                                        vName
+                                            .Replace("RightToWorkDigitalIdentity", "")
+                                            .Replace("Verification", "")
+                                    );
                                 }
                             }
                         }
@@ -625,12 +653,23 @@ namespace SVP.Plugins.TrustId
                     }
                     else
                     {
-                        // Digital Identity: RTW: Digital Identity - Pass - Continuous
+                        // Digital Identity: RTW: Digital Identity - Pass
+                        // Only append status if it's NOT Continuous (the default/expected outcome)
                         var checkPart = rtwDigitalIdResult ?? "N/A";
                         if (rtwDigitalIdResult == "Fail" && rtwDigitalIdFailureReasons.Count > 0)
                             checkPart += $" ({string.Join(", ", rtwDigitalIdFailureReasons)})";
 
-                        rtwCompactLine = $"RTW: Digital Identity - {checkPart} - {rtwFlexStatus ?? "N/A"}";
+                        var showFlexStatus =
+                            !string.IsNullOrWhiteSpace(rtwFlexStatus)
+                            && !string.Equals(
+                                rtwFlexStatus,
+                                "Continuous",
+                                StringComparison.OrdinalIgnoreCase
+                            );
+
+                        rtwCompactLine = showFlexStatus
+                            ? $"RTW: Digital Identity - {checkPart} - {rtwFlexStatus}"
+                            : $"RTW: Digital Identity - {checkPart}";
                     }
 
                     // --- Step 5: Build RTW Details section (only populated lines) ---
@@ -720,19 +759,19 @@ namespace SVP.Plugins.TrustId
                     }
 
                     // --- KYC/AML Check ---
-                    string kycAmlResult = "N/A";
+                    //string kycAmlResult = "N/A";
 
-                    foreach (var v in validationList.EnumerateArray())
-                    {
-                        var vName = v.GetProperty("Name").GetString();
-                        if (vName == "KycAmlCheck")
-                        {
-                            kycAmlResult = v.TryGetProperty("DetailedResult", out var kr)
-                                ? kr.GetString()
-                                : "N/A";
-                            break;
-                        }
-                    }
+                    //foreach (var v in validationList.EnumerateArray())
+                    //{
+                    //    var vName = v.GetProperty("Name").GetString();
+                    //    if (vName == "KycAmlCheck")
+                    //    {
+                    //        kycAmlResult = v.TryGetProperty("DetailedResult", out var kr)
+                    //            ? kr.GetString()
+                    //            : "N/A";
+                    //        break;
+                    //    }
+                    //}
 
                     // --- Overall Status: 0=NO_ALERT, 1=ALERT, 2=RESOLVED ---
                     string overallStatus = "N/A";
@@ -756,13 +795,14 @@ namespace SVP.Plugins.TrustId
                         }
                     }
 
-                    // Report Details 
+                    // Report Details
 
                     // --- Step 6: Build results status with new compact RTW line ---
                     var resultsstatus =
-                        rtwCompactLine + "\n" +
-                        $"DBS Basic Check: {dbsSummary}\n" +
-                        $"Address Verification: {addressVerificationResult}";
+                        rtwCompactLine
+                        + "\n"
+                        + $"DBS Basic Check: {dbsSummary}\n"
+                        + $"Address Verification: {addressVerificationResult}";
 
                     var documentSummary =
                         $"Document: {docType ?? "Unknown"}\n"
@@ -775,10 +815,18 @@ namespace SVP.Plugins.TrustId
                         + $"Address: {(string.IsNullOrWhiteSpace(fullAddress) ? "N/A" : fullAddress)}";
 
                     var otherNotes =
-                        $"KYC/AML Check: {kycAmlResult}\n" + $"Overall Status: {overallStatus}";
+                        //$"KYC/AML Check: {kycAmlResult}\n"
+                        $"Overall Status: {overallStatus}";
 
                     // --- Step 7: Assemble report with RTW Details section ---
-                    update["parl_trustidreportdetails"] = resultsstatus + "\n\n" + documentSummary + "\n\n" + rtwDetails + "\n\n" + otherNotes;
+                    update["parl_trustidreportdetails"] =
+                        resultsstatus
+                        + "\n\n"
+                        + documentSummary
+                        + "\n\n"
+                        + rtwDetails
+                        + "\n\n"
+                        + otherNotes;
 
                     // Summary Description
                     var summarydescription =
@@ -787,15 +835,13 @@ namespace SVP.Plugins.TrustId
                         + $"Message: {root.GetProperty("Message").GetString()}\n"
                         + $"ContainerId: {containerEl.GetProperty("Id").GetString()}";
 
-                    // Last Message 
+                    // Last Message
                     update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
                     update["parl_trustidlastmessagedescription"] = summarydescription;
 
                     // Results Description
                     update["parl_trustidresultsupdatedon"] = DateTime.UtcNow;
                     update["parl_trustidresultsdescription"] = summarydescription;
-
-
                 }
                 catch (Exception ex)
                 {
