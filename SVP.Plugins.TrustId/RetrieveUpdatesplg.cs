@@ -392,54 +392,68 @@ namespace SVP.Plugins.TrustId
                         expiryDate = null,
                         nationality = null,
                         docType = null;
+                    bool documentRead = false;
+
 
                     if (
-                        containerEl.TryGetProperty("Documents", out var documents)
-                        && documents.GetArrayLength() > 0
-                    )
+                                            containerEl.TryGetProperty("Documents", out var documents)
+                                            && documents.GetArrayLength() > 0
+                                        )
                     {
                         var firstDoc = documents[0];
 
-                        if (firstDoc.TryGetProperty("Nationality", out var natEl))
-                            nationality = natEl.GetProperty("Name").GetString();
+                        documentRead = firstDoc.TryGetProperty("SuccessfullyRead", out var srEl)
+                            && srEl.ValueKind == JsonValueKind.True;
 
-                        if (firstDoc.TryGetProperty("DocumentVersion", out var docVerEl))
-                            docType = docVerEl.GetProperty("Name").GetString();
-
-                        if (firstDoc.TryGetProperty("DocumentFields", out var fields))
+                        if (documentRead)
                         {
-                            foreach (var field in fields.EnumerateArray())
+                            if (
+                                firstDoc.TryGetProperty("Nationality", out var natEl)
+                                && natEl.ValueKind == JsonValueKind.Object
+                            )
+                                nationality = natEl.GetProperty("Name").GetString();
+
+                            if (
+                                firstDoc.TryGetProperty("DocumentVersion", out var docVerEl)
+                                && docVerEl.ValueKind == JsonValueKind.Object
+                            )
+                                docType = docVerEl.GetProperty("Name").GetString();
+
+                            if (firstDoc.TryGetProperty("DocumentFields", out var fields))
                             {
-                                var fieldName = field.GetProperty("Name").GetString();
-                                switch (fieldName)
+                                foreach (var field in fields.EnumerateArray())
                                 {
-                                    case "VI Firstname":
-                                        firstName = field
-                                            .GetProperty("FieldValueString")
-                                            .GetString();
-                                        break;
-                                    case "VI Middlename":
-                                        middleName = field
-                                            .GetProperty("FieldValueString")
-                                            .GetString();
-                                        break;
-                                    case "VI Surname":
-                                        surname = field.GetProperty("FieldValueString").GetString();
-                                        break;
-                                    case "VI Birth Date":
-                                        var dobRaw = field
-                                            .GetProperty("FieldValueDate")
-                                            .GetString();
-                                        if (DateTime.TryParse(dobRaw, out var dobParsed))
-                                            dob = dobParsed.ToString("dd/MM/yyyy");
-                                        break;
-                                    case "VI Expiration Date":
-                                        var expRaw = field
-                                            .GetProperty("FieldValueDate")
-                                            .GetString();
-                                        if (DateTime.TryParse(expRaw, out var expParsed))
-                                            expiryDate = expParsed.ToString("dd/MM/yyyy");
-                                        break;
+                                    var fieldName = field.GetProperty("Name").GetString();
+                                    switch (fieldName)
+                                    {
+                                        case "VI Firstname":
+                                            firstName = field
+                                                .GetProperty("FieldValueString")
+                                                .GetString();
+                                            break;
+                                        case "VI Middlename":
+                                            middleName = field
+                                                .GetProperty("FieldValueString")
+                                                .GetString();
+                                            break;
+                                        case "VI Surname":
+                                            surname = field.GetProperty("FieldValueString").GetString();
+                                            break;
+                                        case "VI Birth Date":
+                                            var dobRaw = field
+                                                .GetProperty("FieldValueDate")
+                                                .GetString();
+                                            if (DateTime.TryParse(dobRaw, out var dobParsed))
+                                                dob = dobParsed.ToString("dd/MM/yyyy");
+                                            break;
+                                        case "VI Expiration Date":
+                                            var expRaw = field
+                                                .GetProperty("FieldValueDate")
+                                                .GetString();
+                                            if (DateTime.TryParse(expRaw, out var expParsed))
+                                                expiryDate = expParsed.ToString("dd/MM/yyyy");
+                                            break;
+                                    }
                                 }
                             }
                         }
@@ -643,6 +657,52 @@ namespace SVP.Plugins.TrustId
                         }
                     }
 
+                    // --- Face Match ---
+                    string faceMatchResult = "Not Performed";
+                    if (
+                        containerEl.TryGetProperty("Documents", out var docsForFaceMatch)
+                        && docsForFaceMatch.GetArrayLength() > 0
+                    )
+                    {
+                        var firstDocProps = docsForFaceMatch[0];
+                        if (firstDocProps.TryGetProperty("GeneralDocumentProperties", out var gdProps))
+                        {
+                            foreach (var prop in gdProps.EnumerateArray())
+                            {
+                                var propName = prop.TryGetProperty("Name", out var pn)
+                                    ? pn.GetString()
+                                    : null;
+                                if (propName == "Photo Matches Applicant (TrustId)")
+                                {
+                                    var value = prop.TryGetProperty("Value", out var valEl)
+                                        && valEl.GetBoolean();
+                                    var valueUndefined = prop.TryGetProperty("ValueUndefined", out var vuEl)
+                                        && vuEl.GetBoolean();
+
+                                    if (!value && !valueUndefined)
+                                    {
+                                        faceMatchResult = "Fail";
+                                    }
+                                    else if (value && !valueUndefined)
+                                    {
+                                        faceMatchResult = "Pass";
+                                    }
+                                    else if (value && valueUndefined)
+                                    {
+                                        var errMsg = prop.TryGetProperty("ErrorMessage", out var emEl)
+                                            ? emEl.GetString()
+                                            : null;
+                                        faceMatchResult = string.IsNullOrWhiteSpace(errMsg)
+                                            ? "Unsure"
+                                            : errMsg;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+
                     // --- Step 4: Build compact RTW line for results section ---
                     string rtwCompactLine;
 
@@ -696,6 +756,8 @@ namespace SVP.Plugins.TrustId
                     if (!string.IsNullOrWhiteSpace(rtwNotes))
                         rtwDetailLines.Add($"Notes: {rtwNotes}");
 
+                    rtwDetailLines.Add($"Face Match: {faceMatchResult}");
+
                     var rtwDetails = string.Join("\n", rtwDetailLines);
 
                     // Extract DBS Basic check results
@@ -741,22 +803,25 @@ namespace SVP.Plugins.TrustId
                             : dbsStatus;
 
                     // --- Address Verification ---
-                    string addressVerificationResult = "N/A";
-
-                    foreach (var v in validationList.EnumerateArray())
+                    string addressVerificationResult = "Not Performed";
+                    if (hasValidationList)
                     {
-                        var vName = v.GetProperty("Name").GetString();
-                        if (vName == "AddressVerification")
+                        foreach (var v in validationList.EnumerateArray())
                         {
-                            addressVerificationResult = v.TryGetProperty(
-                                "DetailedResult",
-                                out var ar
-                            )
-                                ? ar.GetString()
-                                : "N/A";
-                            break;
+                            var vName = v.GetProperty("Name").GetString();
+                            if (vName == "AddressVerification")
+                            {
+                                var raw = v.TryGetProperty("DetailedResult", out var ar)
+                                    ? ar.GetString()
+                                    : null;
+                                addressVerificationResult = string.IsNullOrWhiteSpace(raw)
+                                    ? "Not Performed"
+                                    : raw;
+                                break;
+                            }
                         }
                     }
+
 
                     // --- KYC/AML Check ---
                     //string kycAmlResult = "N/A";
@@ -804,15 +869,31 @@ namespace SVP.Plugins.TrustId
                         + $"DBS Basic Check: {dbsSummary}\n"
                         + $"Address Verification: {addressVerificationResult}";
 
-                    var documentSummary =
-                        $"Document: {docType ?? "Unknown"}\n"
-                        + $"First Name: {firstName ?? "N/A"}\n"
-                        + $"Middle Name: {middleName ?? "N/A"}\n"
-                        + $"Surname: {surname ?? "N/A"}\n"
-                        + $"Date of Birth: {dob ?? "N/A"}\n"
-                        + $"Expiry Date: {expiryDate ?? "N/A"}\n"
-                        + $"Nationality: {nationality ?? "N/A"}\n"
-                        + $"Address: {(string.IsNullOrWhiteSpace(fullAddress) ? "N/A" : fullAddress)}";
+                    string documentSummary;
+                    if (documentRead)
+                    {
+                        documentSummary =
+                            $"Document: {docType ?? "Unknown"}\n"
+                            + $"First Name: {firstName ?? "N/A"}\n"
+                            + $"Middle Name: {middleName ?? "N/A"}\n"
+                            + $"Surname: {surname ?? "N/A"}\n"
+                            + $"Date of Birth: {dob ?? "N/A"}\n"
+                            + $"Expiry Date: {expiryDate ?? "N/A"}\n"
+                            + $"Nationality: {nationality ?? "N/A"}\n"
+                            + $"\nAddress Input: {(string.IsNullOrWhiteSpace(fullAddress) ? "N/A" : fullAddress)}";
+                    }
+                    else
+                    {
+                        documentSummary =
+                            "Document: Not Read\n"
+                            + $"First Name: {firstName ?? "Not Read"}\n"
+                            + $"Middle Name: {middleName ?? "Not Read"}\n"
+                            + $"Surname: {surname ?? "Not Read"}\n"
+                            + $"Date of Birth: {dob ?? "Not Read"}\n"
+                            + $"Expiry Date: {expiryDate ?? "Not Read"}\n"
+                            + $"Nationality: {nationality ?? "Not Read"}\n"
+                            + $"\nAddress Input: {(string.IsNullOrWhiteSpace(fullAddress) ? "N/A" : fullAddress)}";
+                    }
 
                     var otherNotes =
                         //$"KYC/AML Check: {kycAmlResult}\n"
@@ -831,9 +912,9 @@ namespace SVP.Plugins.TrustId
                     // Summary Description
                     var summarydescription =
                         "Reports Status.\n"
-                        + $"Fullname: {containerEl.GetProperty("Fullname").GetString()}\n"
-                        + $"Message: {root.GetProperty("Message").GetString()}\n"
-                        + $"ContainerId: {containerEl.GetProperty("Id").GetString()}";
+                        + $"Fullname: {containerEl.GetProperty("Fullname").GetString() ?? "Not Found"}\n"
+                        + $"Message: {root.GetProperty("Message").GetString() ?? "Not Found"}\n"
+                        + $"ContainerId: {containerEl.GetProperty("Id").GetString() ?? "Not Found"}";
 
                     // Last Message
                     update["parl_trustidlastmessagedate"] = DateTime.UtcNow;
