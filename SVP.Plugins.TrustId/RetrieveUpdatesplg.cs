@@ -176,7 +176,7 @@ namespace SVP.Plugins.TrustId
                     default: // Trust ID (802390000) or any other value
                         docUrl = retrieveDocUrl;
                         docBody = retrieveDocBody;
-                        tracing.Trace($"Using live TrustID URL (pivot: {pivot}).");
+                        tracing.Trace($"Using TrustID URL (pivot: {pivot}).");
                         break;
                 }
 
